@@ -13,6 +13,7 @@ void compile(void)
     struct zd_cmd cmd = {0};
     zd_cmd_init(&cmd);
     zd_cmd_append_arg(&cmd, "gcc");
+    zd_cmd_append_arg(&cmd, "-O3");
     zd_cmd_append_arg(&cmd, "-Wall", "-Wextra");
     zd_cmd_append_arg(&cmd, "-I", SRC_DIR);
     zd_cmd_append_arg(&cmd, "-o", TARGET);
@@ -42,9 +43,38 @@ void clean(void)
     zd_fs_remove(TARGET);
 }
 
-void test(void)
+void test(const char *input)
 {
-    printf("nothing in test\n");
+    if (!zd_wildcard_match(input, "*.c"))
+        zd_log(LOG_FATAL, "%s is not a c file", input);
+
+    struct zd_builder builder = {0};
+    zd_build_init(&builder);
+
+    struct zd_string exe = {0};
+    exe = zd_string_sub(input, 0, strlen(input) - 2);
+
+    struct zd_cmd cmd = {0};
+    zd_cmd_init(&cmd);
+
+    zd_cmd_append_arg(&cmd, "riscv64-unknown-elf-gcc");
+    zd_cmd_append_arg(&cmd, "-O3");
+    zd_cmd_append_arg(&cmd, "-o");
+    zd_cmd_append_arg(&cmd, exe.base);
+    zd_cmd_append_arg(&cmd, input);
+    zd_build_append_cmd(&builder, &cmd);
+
+    cmd = (struct zd_cmd) {0};
+    zd_cmd_init(&cmd);
+
+    zd_cmd_append_arg(&cmd, "qemu-riscv64");
+    zd_cmd_append_arg(&cmd, exe.base);
+    zd_build_append_cmd(&builder, &cmd);
+
+    zd_build_run_sync(&builder);
+
+    zd_string_destroy(&exe);
+    zd_build_destroy(&builder);
 }
 
 void define_rule(struct zd_cmdl *cmdl)
@@ -57,8 +87,6 @@ void define_rule(struct zd_cmdl *cmdl)
 
 int main(int argc, char **argv)
 {
-    zd_build_self(argc, argv);
-
     struct zd_cmdl cmdl = {0};
     zd_cmdl_init(&cmdl, false);
 
@@ -77,9 +105,11 @@ int main(int argc, char **argv)
         compile();
     else if (is_clean)
         clean();
-    else if (is_test)
-        test();
-    else
+    else if (is_test) {
+        struct zd_cmdlopt *opt = zd_cmdl_get_opt(&cmdl, "test");
+        struct zd_string *arg = zd_dyna_get(&opt->vals, 0);
+        test(arg->base);
+    } else
         zd_log(LOG_INFO, "unknown option");
 
     zd_cmdl_destroy(&cmdl);
